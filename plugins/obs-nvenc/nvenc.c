@@ -863,6 +863,8 @@ static bool init_encoder(struct nvenc_data *enc, enum codec_type codec, obs_data
 	case CODEC_AV1:
 		return init_encoder_av1(enc, settings);
 #endif
+	default:
+		break;
 	}
 
 	return false;
@@ -892,6 +894,8 @@ static void *nvenc_create_internal(enum codec_type codec, obs_data_t *settings, 
 		enc->codec_guid = NV_ENC_CODEC_AV1_GUID;
 		break;
 #endif
+	default:
+		break;
 	}
 
 	if (!init_nvenc(encoder))
@@ -1001,6 +1005,8 @@ reroute:
 	case CODEC_AV1:
 		return obs_encoder_create_rerouted(encoder, "obs_nvenc_av1_soft");
 #endif
+	default:
+		break;
 	}
 
 	return NULL;

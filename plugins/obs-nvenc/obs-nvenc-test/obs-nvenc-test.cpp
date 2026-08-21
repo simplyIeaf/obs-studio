@@ -94,11 +94,11 @@ static const vector<pair<NV_ENC_CAPS, string>> capabilities = {
 #endif
 };
 
-static const vector<pair<string_view, GUID>> codecs = {{"h264", NV_ENC_CODEC_H264_GUID},
-						       {"hevc", NV_ENC_CODEC_HEVC_GUID
+static const vector<pair<string_view, GUID>> codecs = {
+	{"h264", NV_ENC_CODEC_H264_GUID},
+	{"hevc", NV_ENC_CODEC_HEVC_GUID},
 #if NVENCAPI_MAJOR_VERSION >= 12
-						       },
-						       {"av1", NV_ENC_CODEC_AV1_GUID}
+	{"av1", NV_ENC_CODEC_AV1_GUID},
 #endif
 };
 
@@ -229,6 +229,7 @@ struct CUDACtx {
 
 	string GetPCIBusId()
 	{
+#if NVENCAPI_MAJOR_VERSION >= 11
 		CUdevice dev;
 		string bus_id;
 		bus_id.resize(16);
@@ -236,6 +237,9 @@ struct CUDACtx {
 		cu->cuCtxGetDevice(&dev);
 		cu->cuDeviceGetPCIBusId(bus_id.data(), (int)bus_id.capacity(), dev);
 		return bus_id;
+#else
+		return {};
+#endif
 	}
 
 	string GetUUID()
@@ -245,7 +249,11 @@ struct CUDACtx {
 		string uuid_str;
 
 		cu->cuCtxGetDevice(&dev);
+#if NVENCAPI_MAJOR_VERSION >= 11
 		cu->cuDeviceGetUuid_v2(&uuid, dev);
+#else
+		cu->cuDeviceGetUuid(&uuid, dev);
+#endif
 
 		uuid_str.resize(32);
 		for (size_t idx = 0; idx < 16; idx++) {
@@ -439,12 +447,17 @@ bool nvenc_checks(codec_caps_map &caps, vector<device_info> &device_infos)
 	}
 
 	/* CUDA driver version and devices */
+#if NVENCAPI_MAJOR_VERSION >= 11
 	if (cu->cuDriverGetVersion(&cuda_driver_ver) == CUDA_SUCCESS) {
 		printf("cuda_ver=%d.%d\n", cuda_driver_ver / 1000, cuda_driver_ver % 1000);
 	} else {
 		printf("reason=no_cuda_version\n");
 		return false;
 	}
+#else
+	/* Not exposed by older ffnvcodec loader headers; purely informational */
+	printf("cuda_ver=0.0\n");
+#endif
 
 	if (cu->cuDeviceGetCount(&cuda_devices) == CUDA_SUCCESS && cuda_devices) {
 		printf("cuda_devices=%d\n", cuda_devices);
