@@ -45,6 +45,21 @@ jobs:
             libdrm-dev nlohmann-json3-dev libwebsocketpp-dev libasio-dev \
             file desktop-file-utils patchelf
 
+      # OBS master uses Qt 6.7+ APIs (invokeMethod with member pointers),
+      # which Ubuntu 24.04's Qt 6.4 lacks. Install a recent Qt instead.
+      # If wayland modules ever fail here, fall back to -DENABLE_WAYLAND=OFF.
+      - name: Install Qt 6.8
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.1'
+          host: linux
+          target: desktop
+          arch: linux_gcc_64
+          dir: ${{ runner.temp }}/Qt
+          cache: true
+          cache-key-prefix: install-qt-linux-x86_64
+          modules: 'qtsvg qtwaylandcompositor qtimageformats'
+
       - name: Install nv-codec-headers (required for NVENC)
         run: |
           git clone --depth 1 --branch n12.2.72.0 https://github.com/FFmpeg/nv-codec-headers.git /tmp/nv-codec-headers
