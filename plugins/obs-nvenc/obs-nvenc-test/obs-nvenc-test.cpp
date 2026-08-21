@@ -76,7 +76,9 @@ static const vector<pair<NV_ENC_CAPS, string>> capabilities = {
 	{NV_ENC_CAPS_SUPPORT_DYN_BITRATE_CHANGE, "dynamic_bitrate"},
 	{NV_ENC_CAPS_SUPPORT_10BIT_ENCODE, "10bit"},
 	{NV_ENC_CAPS_SUPPORT_BFRAME_REF_MODE, "bref"},
+#if NVENCAPI_MAJOR_VERSION >= 11
 	{NV_ENC_CAPS_NUM_ENCODER_ENGINES, "engines"},
+#endif
 	{NV_ENC_CAPS_SUPPORT_YUV444_ENCODE, "yuv_444"},
 	{NV_ENC_CAPS_WIDTH_MAX, "max_width"},
 	{NV_ENC_CAPS_HEIGHT_MAX, "max_height"},
@@ -93,8 +95,12 @@ static const vector<pair<NV_ENC_CAPS, string>> capabilities = {
 };
 
 static const vector<pair<string_view, GUID>> codecs = {{"h264", NV_ENC_CODEC_H264_GUID},
-						       {"hevc", NV_ENC_CODEC_HEVC_GUID},
-						       {"av1", NV_ENC_CODEC_AV1_GUID}};
+						       {"hevc", NV_ENC_CODEC_HEVC_GUID
+#if NVENCAPI_MAJOR_VERSION >= 12
+						       },
+						       {"av1", NV_ENC_CODEC_AV1_GUID}
+#endif
+};
 
 typedef unordered_map<string, unordered_map<string, int>> codec_caps_map;
 

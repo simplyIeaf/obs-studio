@@ -64,6 +64,7 @@ static const char *hevc_nvenc_soft_get_name(void *type_data)
 }
 #endif
 
+#ifdef NVENC_12_0_OR_LATER
 static const char *av1_nvenc_get_name(void *type_data)
 {
 	UNUSED_PARAMETER(type_data);
@@ -75,6 +76,7 @@ static const char *av1_nvenc_soft_get_name(void *type_data)
 	UNUSED_PARAMETER(type_data);
 	return "NVIDIA NVENC AV1 (Fallback)";
 }
+#endif
 
 static inline int nv_get_cap(struct nvenc_data *enc, NV_ENC_CAPS cap)
 {
@@ -206,6 +208,7 @@ static inline NV_ENC_TUNING_INFO get_nv_tuning(const char *tuning)
 	}
 }
 
+#ifdef NVENC_11_0_OR_LATER
 static inline NV_ENC_MULTI_PASS get_nv_multipass(const char *multipass)
 {
 	if (astrcmpi(multipass, "qres") == 0) {
@@ -216,6 +219,7 @@ static inline NV_ENC_MULTI_PASS get_nv_multipass(const char *multipass)
 		return NV_ENC_MULTI_PASS_DISABLED;
 	}
 }
+#endif
 
 static bool is_10_bit(const struct nvenc_data *enc)
 {
@@ -254,11 +258,15 @@ static bool init_encoder_base(struct nvenc_data *enc, obs_data_t *settings)
 
 	GUID nv_preset = get_nv_preset(enc->props.preset);
 	NV_ENC_TUNING_INFO nv_tuning = get_nv_tuning(enc->props.tune);
+#ifdef NVENC_11_0_OR_LATER
 	NV_ENC_MULTI_PASS nv_multipass = get_nv_multipass(enc->props.multipass);
+#endif
 
 	if (lossless) {
 		nv_tuning = NV_ENC_TUNING_INFO_LOSSLESS;
+#ifdef NVENC_11_0_OR_LATER
 		nv_multipass = NV_ENC_MULTI_PASS_DISABLED;
+#endif
 		enc->props.adaptive_quantization = false;
 		enc->props.cqp = 0;
 		enc->props.rate_control = "Lossless";
@@ -378,7 +386,9 @@ static bool init_encoder_base(struct nvenc_data *enc, obs_data_t *settings)
 		config->rcParams.vbvBufferSize = 0;
 	}
 
+#ifdef NVENC_11_0_OR_LATER
 	config->rcParams.multiPass = nv_multipass;
+#endif
 	config->rcParams.qpMapMode = NV_ENC_QP_MAP_DELTA;
 
 	/* -------------------------- */
@@ -649,6 +659,7 @@ static bool init_encoder_hevc(struct nvenc_data *enc, obs_data_t *settings)
 	return true;
 }
 
+#ifdef NVENC_12_0_OR_LATER
 static bool init_encoder_av1(struct nvenc_data *enc, obs_data_t *settings)
 {
 	if (!init_encoder_base(enc, settings)) {
@@ -742,6 +753,7 @@ static bool init_encoder_av1(struct nvenc_data *enc, obs_data_t *settings)
 
 	return true;
 }
+#endif
 
 static bool init_bitstreams(struct nvenc_data *enc)
 {
@@ -847,8 +859,10 @@ static bool init_encoder(struct nvenc_data *enc, enum codec_type codec, obs_data
 		return init_encoder_hevc(enc, settings);
 	case CODEC_H264:
 		return init_encoder_h264(enc, settings);
+#ifdef NVENC_12_0_OR_LATER
 	case CODEC_AV1:
 		return init_encoder_av1(enc, settings);
+#endif
 	}
 
 	return false;
@@ -873,9 +887,11 @@ static void *nvenc_create_internal(enum codec_type codec, obs_data_t *settings, 
 	case CODEC_HEVC:
 		enc->codec_guid = NV_ENC_CODEC_HEVC_GUID;
 		break;
+#ifdef NVENC_12_0_OR_LATER
 	case CODEC_AV1:
 		enc->codec_guid = NV_ENC_CODEC_AV1_GUID;
 		break;
+#endif
 	}
 
 	if (!init_nvenc(encoder))
@@ -981,8 +997,10 @@ reroute:
 		return obs_encoder_create_rerouted(encoder, "obs_nvenc_h264_soft");
 	case CODEC_HEVC:
 		return obs_encoder_create_rerouted(encoder, "obs_nvenc_hevc_soft");
+#ifdef NVENC_12_0_OR_LATER
 	case CODEC_AV1:
 		return obs_encoder_create_rerouted(encoder, "obs_nvenc_av1_soft");
+#endif
 	}
 
 	return NULL;
@@ -1000,10 +1018,12 @@ static void *hevc_nvenc_create(obs_data_t *settings, obs_encoder_t *encoder)
 }
 #endif
 
+#ifdef NVENC_12_0_OR_LATER
 static void *av1_nvenc_create(obs_data_t *settings, obs_encoder_t *encoder)
 {
 	return nvenc_create_base(CODEC_AV1, settings, encoder, true);
 }
+#endif
 
 static void *h264_nvenc_soft_create(obs_data_t *settings, obs_encoder_t *encoder)
 {
@@ -1017,10 +1037,12 @@ static void *hevc_nvenc_soft_create(obs_data_t *settings, obs_encoder_t *encoder
 }
 #endif
 
+#ifdef NVENC_12_0_OR_LATER
 static void *av1_nvenc_soft_create(obs_data_t *settings, obs_encoder_t *encoder)
 {
 	return nvenc_create_base(CODEC_AV1, settings, encoder, false);
 }
+#endif
 
 static bool get_encoded_packet(struct nvenc_data *enc, bool finalize);
 
@@ -1444,6 +1466,7 @@ struct obs_encoder_info hevc_nvenc_info = {
 };
 #endif
 
+#ifdef NVENC_12_0_OR_LATER
 struct obs_encoder_info av1_nvenc_info = {
 	.id = "obs_nvenc_av1_tex",
 	.codec = "av1",
@@ -1463,6 +1486,7 @@ struct obs_encoder_info av1_nvenc_info = {
 	.get_properties = av1_nvenc_properties,
 	.get_extra_data = nvenc_extra_data,
 };
+#endif
 
 struct obs_encoder_info h264_nvenc_soft_info = {
 	.id = "obs_nvenc_h264_soft",
@@ -1502,6 +1526,7 @@ struct obs_encoder_info hevc_nvenc_soft_info = {
 };
 #endif
 
+#ifdef NVENC_12_0_OR_LATER
 struct obs_encoder_info av1_nvenc_soft_info = {
 	.id = "obs_nvenc_av1_soft",
 	.codec = "av1",
@@ -1518,6 +1543,7 @@ struct obs_encoder_info av1_nvenc_soft_info = {
 	.get_extra_data = nvenc_extra_data,
 	.get_video_info = nvenc_soft_video_info,
 };
+#endif
 
 void register_encoders(void)
 {
@@ -1527,8 +1553,10 @@ void register_encoders(void)
 	obs_register_encoder(&hevc_nvenc_info);
 	obs_register_encoder(&hevc_nvenc_soft_info);
 #endif
+#ifdef NVENC_12_0_OR_LATER
 	if (is_codec_supported(CODEC_AV1)) {
 		obs_register_encoder(&av1_nvenc_info);
 		obs_register_encoder(&av1_nvenc_soft_info);
 	}
+#endif
 }
