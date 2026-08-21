@@ -62,8 +62,10 @@ jobs:
           modules: 'qtwaylandcompositor qtimageformats'
 
       - name: Install nv-codec-headers (required for NVENC)
+        # SDK 10 headers: the legacy 470xx driver for Kepler GPUs only supports
+        # NVENC API 10. obs-nvenc guards newer APIs via NVENCAPI_MAJOR_VERSION.
         run: |
-          git clone --depth 1 --branch n12.2.72.0 https://github.com/FFmpeg/nv-codec-headers.git /tmp/nv-codec-headers
+          git clone --depth 1 --branch n10.0.26.0 https://github.com/FFmpeg/nv-codec-headers.git /tmp/nv-codec-headers
           sudo make -C /tmp/nv-codec-headers install PREFIX=/usr/local
           echo "PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}" >> "$GITHUB_ENV"
           pkg-config --modversion ffnvcodec
@@ -99,7 +101,9 @@ jobs:
             -DENABLE_PORTABLE_CONFIG=ON \
             -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_PREFIX }} \
             -DENABLE_BROWSER=OFF \
-            -DENABLE_FFMPEG_NVENC=ON \
+            # ffmpeg_nvenc is built against NVENC API 12 in Ubuntu's ffmpeg and
+            # would always fail on the 470xx driver; native obs-nvenc handles it.
+            -DENABLE_FFMPEG_NVENC=OFF \
             -DENABLE_AJA=OFF \
             -DENABLE_CCACHE=ON \
             -DOBS_COMPILE_DEPRECATION_AS_WARNING=ON
@@ -134,6 +138,13 @@ jobs:
             [ -d "$QT_PLUGINS_DIR/$d" ] && cp -a "$QT_PLUGINS_DIR/$d" "$APPDIR/usr/lib/qt6/plugins/"
           done
 
+          # Bundle the Python standard library so the obspython scripting
+          # module works (libpython3.12.so is bundled via ldd, but without
+          # the stdlib the interpreter dies with "No module named 'encodings'")
+          PYMAJOR=$(python3 -c 'import sys; print(sys.version_info.major)')
+          PYMINOR=$(python3 -c 'import sys; print(sys.version_info.minor)')
+          cp -a "/usr/lib/python${PYMAJOR}.${PYMINOR}" "$APPDIR/usr/lib/python${PYMAJOR}.${PYMINOR}"
+
           # Recursively bundle all shared library dependencies, excluding
           # glibc and graphics driver libraries that must come from the host
           declare -A SEEN
@@ -147,7 +158,10 @@ jobs:
             case "$base" in
               libc.so*|libm.so*|ld-linux*|libpthread*|libdl.so*|librt.so*|libresolv*|libnss_*|\
               libGL.so*|libEGL.so*|libGLESv1*|libGLESv2*|libOpenGL.so*|libglapi.so*|libgbm.so*|\
-              libdrm*|libvulkan*|libnvidia*|libcuda*|libnvcuvid*|libnvoptix*)
+              libdrm*|libvulkan*|libnvidia*|libcuda*|libnvcuvid*|libnvoptix*|\
+              libX*.so*|libxcb*|libxkbcommon*|libwayland*|libXau*|libXdmcp*|libxshmfence*)
+                # GL/driver and X11/Wayland client stacks must come from the
+                # host: bundling them breaks Mesa/glvnd vendor initialization
                 return 0 ;;
             esac
             cp -L "$lib" "$APPDIR/usr/lib/"
@@ -190,6 +204,8 @@ jobs:
             export LD_LIBRARY_PATH="$d:${LD_LIBRARY_PATH:-}"
           done
           export QT_PLUGIN_PATH="$HERE/usr/lib/qt6/plugins:${QT_PLUGIN_PATH:-}"
+          export PYTHONHOME="$HERE/usr"
+          export PYTHONPATH="$HERE/usr/lib/python3.12:${PYTHONPATH:-}"
           exec "$HERE/usr/bin/obs" "$@"
           EOF
           chmod +x "$APPDIR/AppRun"
@@ -200,6 +216,11 @@ jobs:
           chmod +x appimagetool.AppImage
           ARCH=x86_64 ./appimagetool.AppImage --appimage-extract-and-run "$APPDIR" \
             "OBS-Studio-${{ env.VERSION }}-linux-x86_64.AppImage"
+
+      - name: Smoke-test AppImage
+        run: |
+          ./OBS-Studio-*-x86_64.AppImage --appimage-extract-and-run --version
+          ldd "./$(ls OBS-Studio-*.AppImage | head -n1)" 2>/dev/null || true
 
       - name: Upload AppImage artifact
         uses: actions/upload-artifact@v4
