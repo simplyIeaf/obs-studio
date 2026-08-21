@@ -1,0 +1,172 @@
+name: Build AppImage
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+env:
+  PRESET: ubuntu
+  BUILD_DIR: build_ubuntu
+  INSTALL_PREFIX: ${{ github.workspace }}/install
+  APPDIR: ${{ github.workspace }}/AppDir
+
+jobs:
+  build-linux:
+    name: Build OBS Studio (Linux x86_64)
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake extra-cmake-modules ninja-build pkg-config clang clang-format build-essential curl ccache git zsh \
+            libavcodec-dev libavdevice-dev libavfilter-dev libavformat-dev libavutil-dev \
+            libswresample-dev libswscale-dev libx264-dev libcurl4-openssl-dev libmbedtls-dev \
+            libgl1-mesa-dev libjansson-dev libluajit-5.1-dev python3-dev libx11-dev \
+            libxcb-randr0-dev libxcb-shm0-dev libxcb-xinerama0-dev libxcb-composite0-dev \
+            libxcomposite-dev libxinerama-dev libxcb1-dev libx11-xcb-dev libxcb-xfixes0-dev \
+            swig libcmocka-dev libxss-dev libglvnd-dev libgles2-mesa-dev libwayland-dev \
+            librist-dev libsrt-openssl-dev libpci-dev libpipewire-0.3-dev libqrcodegencpp-dev \
+            uthash-dev libsimde-dev \
+            qt6-base-dev qt6-base-private-dev qt6-svg-dev qt6-wayland qt6-image-formats-plugins \
+            libasound2-dev libfdk-aac-dev libfontconfig-dev libfreetype6-dev libjack-jackd2-dev \
+            libpulse-dev libsndio-dev libspeexdsp-dev libudev-dev libv4l-dev libva-dev libvlc-dev \
+            libdrm-dev nlohmann-json3-dev libwebsocketpp-dev libasio-dev \
+            file desktop-file-utils patchelf
+
+      - name: Install nv-codec-headers (required for NVENC)
+        run: |
+          git clone --depth 1 --branch n12.2.72.0 https://github.com/FFmpeg/nv-codec-headers.git /tmp/nv-codec-headers
+          make -C /tmp/nv-codec-headers install PREFIX=/usr/local
+          echo "PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}" >> "$GITHUB_ENV"
+
+      - name: Configure (portable mode, NVENC enabled)
+        run: |
+          cmake --preset ${{ env.PRESET }} \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DENABLE_RELOCATABLE=ON \
+            -DENABLE_PORTABLE_CONFIG=ON \
+            -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_PREFIX }} \
+            -DENABLE_BROWSER=OFF \
+            -DENABLE_FFMPEG_NVENC=ON \
+            -DENABLE_AJA=OFF \
+            -DOBS_COMPILE_DEPRECATION_AS_WARNING=ON
+
+      - name: Build
+        run: cmake --build ${{ env.BUILD_DIR }} --parallel $(nproc)
+
+      - name: Install
+        run: cmake --install ${{ env.BUILD_DIR }}
+
+      - name: Package portable tarball
+        run: |
+          VERSION=$(git describe --tags --always --dirty)
+          tar -czf "OBS-Studio-${VERSION}-linux-portable.tar.gz" -C "${{ env.INSTALL_PREFIX }}" .
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+
+      - name: Package AppImage
+        run: |
+          set -euo pipefail
+
+          mkdir -p "$APPDIR/usr"
+          cp -a "${{ env.INSTALL_PREFIX }}/bin" "$APPDIR/usr/"
+          cp -a "${{ env.INSTALL_PREFIX }}/share" "$APPDIR/usr/"
+          cp -a "${{ env.INSTALL_PREFIX }}/lib" "$APPDIR/usr/"
+
+          # Bundle Qt platform plugins so the AppImage is self-contained
+          QT_PLUGINS_DIR=$(qmake6 -query QT_INSTALL_PLUGINS 2>/dev/null || find /usr/lib -type d -path '*qt6/plugins' | head -n1)
+          mkdir -p "$APPDIR/usr/lib/qt6/plugins"
+          for d in platforms imageformats iconengines xcbglintegrations platforminputcontexts platformthemes; do
+            [ -d "$QT_PLUGINS_DIR/$d" ] && cp -a "$QT_PLUGINS_DIR/$d" "$APPDIR/usr/lib/qt6/plugins/"
+          done
+
+          # Recursively bundle all shared library dependencies, excluding
+          # glibc and graphics driver libraries that must come from the host
+          declare -A SEEN
+          copy_deps() {
+            local lib="$1"
+            [ -n "$lib" ] && [ -f "$lib" ] || return 0
+            local base
+            base="$(basename "$lib")"
+            [ -z "${SEEN[$base]:-}" ] || return 0
+            SEEN[$base]=1
+            case "$base" in
+              libc.so*|libm.so*|ld-linux*|libpthread*|libdl.so*|librt.so*|libresolv*|libnss_*|\
+              libGL.so*|libEGL.so*|libGLESv1*|libGLESv2*|libOpenGL.so*|libglapi.so*|libgbm.so*|\
+              libdrm*|libvulkan*|libnvidia*|libcuda*|libnvcuvid*|libnvoptix*)
+                return 0 ;;
+            esac
+            cp -L "$lib" "$APPDIR/usr/lib/"
+            local dep
+            for dep in $(ldd "$lib" 2>/dev/null | awk '/=> \// {print $3} /^[^ \t].*\.so/ {print $1}'); do
+              copy_deps "$dep"
+            done
+          }
+
+          copy_deps "$APPDIR/usr/bin/obs"
+          while IFS= read -r -d '' plugin; do
+            copy_deps "$plugin"
+          done < <(find "$APPDIR/usr/lib" -name '*.so*' -print0)
+
+          # Make sure obs and its plugins resolve bundled libs from AppDir.
+          # The install layout nests libs under lib/<arch>-linux-gnu, so cover
+          # every level via LD_LIBRARY_PATH in AppRun (rpath kept simple).
+          LIB_SUBDIRS=$(find "$APPDIR/usr/lib" -mindepth 1 -maxdepth 1 -type d -printf '%f\n')
+          RPATH_ARGS='$ORIGIN/../lib'
+          for d in $LIB_SUBDIRS; do
+            RPATH_ARGS="$RPATH_ARGS:\$ORIGIN/../lib/$d"
+          done
+          patchelf --set-rpath "$RPATH_ARGS" "$APPDIR/usr/bin/obs"
+          while IFS= read -r -d '' plugin; do
+            patchelf --set-rpath '$ORIGIN:$ORIGIN/..:$ORIGIN/../..' "$plugin" || true
+          done < <(find "$APPDIR/usr/lib" -name '*.so*' -print0)
+
+          # Desktop file and icons
+          DESKTOP_FILE="$APPDIR/usr/share/applications/com.obsproject.Studio.desktop"
+          ICON_FILE=$(find "$APPDIR/usr/share/icons/hicolor" -name 'com.obsproject.Studio.png' | sort -V | tail -n1)
+          cp "$DESKTOP_FILE" "$APPDIR/com.obsproject.Studio.desktop"
+          cp "$ICON_FILE" "$APPDIR/com.obsproject.Studio.png"
+          cp "$ICON_FILE" "$APPDIR/.DirIcon"
+
+          # AppRun wrapper
+          cat > "$APPDIR/AppRun" <<'EOF'
+          #!/bin/bash
+          HERE="$(dirname "$(readlink -f "${0}")")"
+          for d in "$HERE"/usr/lib/*/ "$HERE"/usr/lib; do
+            export LD_LIBRARY_PATH="$d:${LD_LIBRARY_PATH:-}"
+          done
+          export QT_PLUGIN_PATH="$HERE/usr/lib/qt6/plugins:${QT_PLUGIN_PATH:-}"
+          exec "$HERE/usr/bin/obs" "$@"
+          EOF
+          chmod +x "$APPDIR/AppRun"
+
+          # Build the AppImage (extract-and-run avoids needing FUSE on the runner)
+          curl -L -o appimagetool.AppImage \
+            https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool.AppImage
+          ARCH=x86_64 ./appimagetool.AppImage --appimage-extract-and-run "$APPDIR" \
+            "OBS-Studio-${{ env.VERSION }}-linux-x86_64.AppImage"
+
+      - name: Upload AppImage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: obs-studio-${{ env.VERSION }}-linux-x86_64-appimage
+          path: OBS-Studio-*-x86_64.AppImage
+          if-no-files-found: error
+
+      - name: Upload portable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: obs-studio-${{ env.VERSION }}-linux-portable
+          path: OBS-Studio-*-linux-portable.tar.gz
+          if-no-files-found: error
