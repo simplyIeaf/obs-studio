@@ -95,14 +95,14 @@ jobs:
 
       - name: Configure (portable mode, NVENC enabled)
         run: |
+          # ffmpeg_nvenc is built against NVENC API 12 in Ubuntu's ffmpeg and
+          # would always fail on the 470xx driver; native obs-nvenc handles it.
           cmake --preset ${{ env.PRESET }} \
             -DCMAKE_BUILD_TYPE=Release \
             -DENABLE_RELOCATABLE=ON \
             -DENABLE_PORTABLE_CONFIG=ON \
             -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_PREFIX }} \
             -DENABLE_BROWSER=OFF \
-            # ffmpeg_nvenc is built against NVENC API 12 in Ubuntu's ffmpeg and
-            # would always fail on the 470xx driver; native obs-nvenc handles it.
             -DENABLE_FFMPEG_NVENC=OFF \
             -DENABLE_AJA=OFF \
             -DENABLE_CCACHE=ON \
