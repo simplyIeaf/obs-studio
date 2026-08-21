@@ -1,4 +1,4 @@
-name: Build AppImage
+name: Build OBS Studio (Linux AppImage)
 
 on:
   workflow_dispatch:
@@ -47,8 +47,24 @@ jobs:
       - name: Install nv-codec-headers (required for NVENC)
         run: |
           git clone --depth 1 --branch n12.2.72.0 https://github.com/FFmpeg/nv-codec-headers.git /tmp/nv-codec-headers
-          make -C /tmp/nv-codec-headers install PREFIX=/usr/local
+          sudo make -C /tmp/nv-codec-headers install PREFIX=/usr/local
           echo "PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}" >> "$GITHUB_ENV"
+          pkg-config --modversion ffnvcodec
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            ccache-${{ runner.os }}-
+
+      - name: Configure ccache
+        run: |
+          ccache --set-config=max_size=1G
+          ccache --set-config=compression=true
+          ccache --zero-stats
+          ccache --show-config | grep -E 'cache_dir|max_size|compression'
 
       - name: Configure (portable mode, NVENC enabled)
         run: |
@@ -60,10 +76,13 @@ jobs:
             -DENABLE_BROWSER=OFF \
             -DENABLE_FFMPEG_NVENC=ON \
             -DENABLE_AJA=OFF \
+            -DENABLE_CCACHE=ON \
             -DOBS_COMPILE_DEPRECATION_AS_WARNING=ON
 
       - name: Build
-        run: cmake --build ${{ env.BUILD_DIR }} --parallel $(nproc)
+        run: |
+          cmake --build ${{ env.BUILD_DIR }} --parallel $(nproc)
+          ccache --show-stats
 
       - name: Install
         run: cmake --install ${{ env.BUILD_DIR }}
