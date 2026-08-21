@@ -65,8 +65,10 @@ static bool apply_rc_opt(const struct obs_option *opt, NV_ENC_RC_PARAMS *nv_conf
 	APPLY_INT_OPT(targetQuality, uint8_t, PRIu8)
 	APPLY_INT_OPT(targetQualityLSB, uint8_t, PRIu8)
 
+#ifdef NVENC_12_2_OR_LATER
 	APPLY_INT_OPT(cbQPIndexOffset, int8_t, PRIi8)
 	APPLY_INT_OPT(crQPIndexOffset, int8_t, PRIi8)
+#endif
 
 	APPLY_BIT_OPT(enableMinQP, 1)
 	APPLY_BIT_OPT(enableMaxQP, 1)
@@ -157,6 +159,7 @@ static bool apply_hevc_opt(struct obs_option *opt, NV_ENC_CONFIG_HEVC *nv_conf)
 	return false;
 }
 
+#ifdef NVENC_12_0_OR_LATER
 static bool apply_av1_opt(struct obs_option *opt, NV_ENC_CONFIG_AV1 *nv_conf)
 {
 	APPLY_INT_OPT(level, uint32_t, PRIu32)
@@ -173,6 +176,7 @@ static bool apply_av1_opt(struct obs_option *opt, NV_ENC_CONFIG_AV1 *nv_conf)
 
 	return false;
 }
+#endif
 
 static bool apply_codec_opt(enum codec_type codec, struct obs_option *opt, NV_ENC_CODEC_CONFIG *enc_config)
 {
@@ -180,8 +184,10 @@ static bool apply_codec_opt(enum codec_type codec, struct obs_option *opt, NV_EN
 		return apply_h264_opt(opt, &enc_config->h264Config);
 	if (codec == CODEC_HEVC)
 		return apply_hevc_opt(opt, &enc_config->hevcConfig);
+#ifdef NVENC_12_0_OR_LATER
 	if (codec == CODEC_AV1)
 		return apply_av1_opt(opt, &enc_config->av1Config);
+#endif
 
 	return false;
 }
