@@ -51,6 +51,14 @@ jobs:
           echo "PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}" >> "$GITHUB_ENV"
           pkg-config --modversion ffnvcodec
 
+      - name: Ensure version tags exist
+        run: |
+          if ! git describe --tags >/dev/null 2>&1; then
+            git tag "$(date -u +'%Y.%-m.%d')"
+            echo "Created fallback version tag: $(date -u +'%Y.%-m.%d')"
+          fi
+          git describe --tags
+
       - name: Restore ccache
         uses: actions/cache@v4
         with:
