@@ -7,6 +7,8 @@
 /* Missing from FFmpeg headers */
 typedef CUresult CUDAAPI tcuMemHostRegister(void *p, size_t bytesize, unsigned int Flags);
 typedef CUresult CUDAAPI tcuMemHostUnregister(void *p);
+typedef CUresult CUDAAPI tcuArray3DCreate(CUarray *pHandle, const CUDA_ARRAY3D_DESCRIPTOR *pAllocateArray);
+typedef CUresult CUDAAPI tcuArrayDestroy(CUarray hArray);
 
 #define CUDA_ERROR_INVALID_GRAPHICS_CONTEXT 219
 #define CUDA_ARRAY3D_SURFACE_LDST 0x02
