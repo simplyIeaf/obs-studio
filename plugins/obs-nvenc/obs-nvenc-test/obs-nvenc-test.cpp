@@ -432,7 +432,9 @@ bool nvenc_checks(codec_caps_map &caps, vector<device_info> &device_infos)
 	/* obtain adapter compatibility information                  */
 
 	uint32_t nvenc_ver;
+#if NVENCAPI_MAJOR_VERSION >= 11
 	int cuda_driver_ver;
+#endif
 	int cuda_devices = 0;
 	int nvenc_devices = 0;
 	char driver_ver[NVML_SYSTEM_DRIVER_VERSION_BUFFER_SIZE];
