@@ -43,7 +43,6 @@ jobs:
             libpulse-dev libsndio-dev libspeexdsp-dev libudev-dev libv4l-dev libva-dev libvlc-dev \
             libvpl-dev \
             libdrm-dev nlohmann-json3-dev libwebsocketpp-dev libasio-dev \
-            libdatachannel-dev \
             file desktop-file-utils patchelf
 
       # OBS master uses Qt 6.7+ APIs (invokeMethod with member pointers),
@@ -115,6 +114,17 @@ jobs:
           cmake -S /tmp/nlohmann_json -B /tmp/nlohmann_json/build \
             -DJSON_BuildTests=OFF -DCMAKE_BUILD_TYPE=Release
           sudo cmake --install /tmp/nlohmann_json/build
+
+      - name: Build and install libdatachannel >= 0.20 (required by WebRTC)
+        run: |
+          # Not packaged for Ubuntu 24.04; obs-webrtc needs LibDataChannel 0.20+.
+          # Default options pull libjuice/usrsctp/libsrtp via FetchContent.
+          git clone --depth 1 --branch v0.20.2 https://github.com/paullouisageneau/libdatachannel.git /tmp/libdatachannel
+          cmake -S /tmp/libdatachannel -B /tmp/libdatachannel/build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/usr/local
+          cmake --build /tmp/libdatachannel/build -j"$(nproc)"
+          sudo cmake --install /tmp/libdatachannel/build
 
       - name: Configure (portable mode, NVENC + browser enabled)
         run: |
