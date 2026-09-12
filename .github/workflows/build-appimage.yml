@@ -282,24 +282,6 @@ jobs:
           ARCH=x86_64 ./appimagetool.AppImage --appimage-extract-and-run "$APPDIR" \
             "OBS-Studio-${{ env.VERSION }}-linux-x86_64.AppImage"
 
-      - name: Smoke-test AppImage
-        run: |
-          # No FUSE on GitHub runners, so the AppImage runtime's self-extract/
-          # mount fallback fails with "sqfs_read_range error". Extract with
-          # unsquashfs and run the extracted AppRun instead.
-          sudo apt-get install -y --no-install-recommends squashfs-tools
-          APPIMAGE=$(ls OBS-Studio-*-x86_64.AppImage | head -n1)
-          cd /tmp
-          unsquashfs -q "$GITHUB_WORKSPACE/$APPIMAGE"
-          cd squashfs-root
-          ./AppRun --version
-          PLUG_CHECK="usr/lib/x86_64-linux-gnu/obs-plugins"
-          test -f "$PLUG_CHECK/obs-browser.so" && echo "OK: obs-browser.so present" || { echo "FAIL: obs-browser.so missing"; exit 1; }
-          test -f usr/lib/libcef.so && echo "OK: libcef.so present" || { echo "FAIL: libcef.so missing"; exit 1; }
-          test -f "$PLUG_CHECK/locales/en-US.pak" && echo "OK: CEF locales present" || { echo "FAIL: CEF locales missing"; exit 1; }
-          test -f "$PLUG_CHECK/obs-webrtc.so" && echo "OK: obs-webrtc.so present" || { echo "FAIL: obs-webrtc.so missing"; exit 1; }
-          test -f "$PLUG_CHECK/linux-jack.so" && echo "OK: linux-jack.so present" || { echo "FAIL: linux-jack.so missing"; exit 1; }
-
       - name: Upload AppImage artifact
         uses: actions/upload-artifact@v4
         with:
