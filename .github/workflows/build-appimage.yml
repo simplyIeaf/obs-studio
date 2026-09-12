@@ -287,13 +287,16 @@ jobs:
 
       - name: Validate AppImage squashfs integrity
         run: |
-          sudo apt-get install -y --no-install-recommends p7zip-full
+          # Use the modern 7-Zip ("7zip", command "7zz"); the legacy p7zip
+          # ("p7zip-full", "7z") cannot open an AppImage: it fails to skip the
+          # ELF prepended to the embedded squashfs.
+          sudo apt-get install -y --no-install-recommends 7zip
           APPIMAGE=$(ls OBS-Studio-*-x86_64.AppImage | head -n1)
           echo "Built: $APPIMAGE ($(stat -c %s "$APPIMAGE") bytes)"
           echo "sha256: $(sha256sum "$APPIMAGE" | cut -d' ' -f1)"
-          # 7z locates the embedded squashfs itself; any undecodable block is an
-          # error. Never upload an artifact whose data blocks are corrupt.
-          ERRORS=$(7z t -bb0 "$APPIMAGE" 2>&1 | tee /dev/stderr | grep -c '^ERROR' || true)
+          # 7zz locates the embedded squashfs itself; any undecodable block is
+          # an error. Never upload an artifact whose data blocks are corrupt.
+          ERRORS=$(7zz t -bb0 "$APPIMAGE" 2>&1 | tee /dev/stderr | grep -c '^ERROR' || true)
           if [ "$ERRORS" -ne 0 ]; then
             echo "FAIL: $ERRORS corrupt block(s) found in AppImage"
             exit 1
