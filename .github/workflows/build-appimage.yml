@@ -119,7 +119,7 @@ jobs:
         run: |
           # Not packaged for Ubuntu 24.04; obs-webrtc needs LibDataChannel 0.20+.
           # Default options pull libjuice/usrsctp/libsrtp via FetchContent.
-          git clone --depth 1 --branch v0.20.2 https://github.com/paullouisageneau/libdatachannel.git /tmp/libdatachannel
+          git clone --depth 1 --branch v0.20.2 --recurse-submodules https://github.com/paullouisageneau/libdatachannel.git /tmp/libdatachannel
           cmake -S /tmp/libdatachannel -B /tmp/libdatachannel/build \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX=/usr/local
