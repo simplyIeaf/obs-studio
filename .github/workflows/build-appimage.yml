@@ -93,7 +93,29 @@ jobs:
           ccache --zero-stats
           ccache --show-config | grep -E 'cache_dir|max_size|compression'
 
-      - name: Configure (portable mode, NVENC enabled)
+      - name: Download Chromium Embedded Framework
+        run: |
+          CEF_VERSION="6533"
+          CEF_REVISION="6"
+          CEF_DIR="${RUNNER_TEMP}/cef"
+          mkdir -p "$CEF_DIR"
+          cd "$CEF_DIR"
+          curl -fL -o cef.tar.xz \
+            "https://cdn-fastly.obsproject.com/downloads/cef_binary_${CEF_VERSION}_linux_x86_64_v${CEF_REVISION}.tar.xz"
+          echo "7963335519a19ccdc5233f7334c5ab023026e2f3e9a0cc417007c09d86608146  cef.tar.xz" | sha256sum -c
+          mkdir cef_root
+          tar -xJf cef.tar.xz -C cef_root --strip-components 1
+          echo "CEF_ROOT_DIR=${CEF_DIR}/cef_root" >> "$GITHUB_ENV"
+
+      - name: Install nlohmann_json >= 3.11 (required by browser source)
+        run: |
+          # Ubuntu 24.04 ships nlohmann-json3-dev 3.10.5; obs-browser needs 3.11+.
+          git clone --depth 1 --branch v3.11.3 https://github.com/nlohmann/json.git /tmp/nlohmann_json
+          cmake -S /tmp/nlohmann_json -B /tmp/nlohmann_json/build \
+            -DJSON_BuildTests=OFF -DCMAKE_BUILD_TYPE=Release
+          sudo cmake --install /tmp/nlohmann_json/build
+
+      - name: Configure (portable mode, NVENC + browser enabled)
         run: |
           # ffmpeg_nvenc is built against NVENC API 12 in Ubuntu's ffmpeg and
           # would always fail on the 470xx driver; native obs-nvenc handles it.
@@ -102,7 +124,8 @@ jobs:
             -DENABLE_RELOCATABLE=ON \
             -DENABLE_PORTABLE_CONFIG=ON \
             -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_PREFIX }} \
-            -DENABLE_BROWSER=OFF \
+            -DENABLE_BROWSER=ON \
+            -DCEF_ROOT_DIR=${{ env.CEF_ROOT_DIR }} \
             -DENABLE_FFMPEG_NVENC=OFF \
             -DENABLE_AJA=OFF \
             -DENABLE_CCACHE=ON \
@@ -130,6 +153,20 @@ jobs:
           cp -a "${{ env.INSTALL_PREFIX }}/bin" "$APPDIR/usr/"
           cp -a "${{ env.INSTALL_PREFIX }}/share" "$APPDIR/usr/"
           cp -a "${{ env.INSTALL_PREFIX }}/lib" "$APPDIR/usr/"
+
+          # Bundle CEF runtime so browser sources work. CEF loads its resource
+          # files (icudtl.dat, *.pak, *.bin) from the same directory as
+          # libcef.so; the obs-browser plugin overrides the locales directory
+          # to a "locales" folder next to obs-browser.so.
+          CEF_LIBDIR="$APPDIR/usr/lib"
+          cp -a "$CEF_ROOT_DIR/Release/libcef.so" "$CEF_LIBDIR/"
+          cp -a "$CEF_ROOT_DIR/Release/libEGL.so" "$CEF_LIBDIR/"
+          cp -a "$CEF_ROOT_DIR/Release/libGLESv2.so" "$CEF_LIBDIR/"
+          cp -a "$CEF_ROOT_DIR/Release/"*.bin "$CEF_LIBDIR/"
+          cp -a "$CEF_ROOT_DIR/Resources/"*.pak "$CEF_LIBDIR/"
+          cp -a "$CEF_ROOT_DIR/Resources/icudtl.dat" "$CEF_LIBDIR/"
+          mkdir -p "$APPDIR/usr/lib/x86_64-linux-gnu/obs-plugins/locales"
+          cp -a "$CEF_ROOT_DIR/Resources/locales/." "$APPDIR/usr/lib/x86_64-linux-gnu/obs-plugins/locales/"
 
           # Bundle Qt platform plugins so the AppImage is self-contained
           QT_PLUGINS_DIR=$(qmake6 -query QT_INSTALL_PLUGINS 2>/dev/null || find /usr/lib -type d -path '*qt6/plugins' | head -n1)
