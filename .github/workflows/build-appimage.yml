@@ -43,6 +43,7 @@ jobs:
             libpulse-dev libsndio-dev libspeexdsp-dev libudev-dev libv4l-dev libva-dev libvlc-dev \
             libvpl-dev \
             libdrm-dev nlohmann-json3-dev libwebsocketpp-dev libasio-dev \
+            libdatachannel-dev \
             file desktop-file-utils patchelf
 
       # OBS master uses Qt 6.7+ APIs (invokeMethod with member pointers),
@@ -128,6 +129,8 @@ jobs:
             -DCEF_ROOT_DIR=${{ env.CEF_ROOT_DIR }} \
             -DENABLE_FFMPEG_NVENC=OFF \
             -DENABLE_AJA=OFF \
+            -DENABLE_WEBRTC=ON \
+            -DENABLE_JACK=ON \
             -DENABLE_CCACHE=ON \
             -DOBS_COMPILE_DEPRECATION_AS_WARNING=ON
 
@@ -201,7 +204,9 @@ jobs:
                 # host: bundling them breaks Mesa/glvnd vendor initialization
                 return 0 ;;
             esac
-            cp -L "$lib" "$APPDIR/usr/lib/"
+            if [ "$(readlink -f "$lib")" != "$(readlink -f "$APPDIR/usr/lib/$base")" ]; then
+              cp -L "$lib" "$APPDIR/usr/lib/"
+            fi
             local dep
             for dep in $(ldd "$lib" 2>/dev/null | awk '/=> \// {print $3} /^[^ \t].*\.so/ {print $1}'); do
               copy_deps "$dep"
@@ -240,6 +245,18 @@ jobs:
           for d in "$HERE"/usr/lib/*/ "$HERE"/usr/lib; do
             export LD_LIBRARY_PATH="$d:${LD_LIBRARY_PATH:-}"
           done
+          # The bundled curl is built against Ubuntu's CA path. On Fedora (and
+          # other distros without /etc/ssl/certs/ca-certificates.crt), point it
+          # at the local bundle so rtmp-services/service updates can verify TLS.
+          for bundle in \
+            /etc/pki/tls/certs/ca-bundle.crt \
+            /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem \
+            /etc/ssl/ca-bundle.pem; do
+            if [ -r "$bundle" ]; then
+              export CURL_CA_BUNDLE="$bundle"
+              break
+            fi
+          done
           export QT_PLUGIN_PATH="$HERE/usr/lib/qt6/plugins:${QT_PLUGIN_PATH:-}"
           export PYTHONHOME="$HERE/usr"
           export PYTHONPATH="$HERE/usr/lib/python3.12:${PYTHONPATH:-}"
@@ -257,6 +274,13 @@ jobs:
       - name: Smoke-test AppImage
         run: |
           ./OBS-Studio-*-x86_64.AppImage --appimage-extract-and-run --version
+          ./OBS-Studio-*.AppImage --appimage-extract >/dev/null
+          PLUG_CHECK="squashfs-root/usr/lib/x86_64-linux-gnu/obs-plugins"
+          test -f "$PLUG_CHECK/obs-browser.so" && echo "OK: obs-browser.so present" || { echo "FAIL: obs-browser.so missing"; exit 1; }
+          test -f squashfs-root/usr/lib/libcef.so && echo "OK: libcef.so present" || { echo "FAIL: libcef.so missing"; exit 1; }
+          test -f squashfs-root/usr/lib/x86_64-linux-gnu/obs-plugins/locales/en-US.pak && echo "OK: CEF locales present" || { echo "FAIL: CEF locales missing"; exit 1; }
+          test -f "$PLUG_CHECK/obs-webrtc.so" && echo "OK: obs-webrtc.so present" || { echo "FAIL: obs-webrtc.so missing"; exit 1; }
+          test -f "$PLUG_CHECK/linux-jack.so" && echo "OK: linux-jack.so present" || { echo "FAIL: linux-jack.so missing"; exit 1; }
           ldd "./$(ls OBS-Studio-*.AppImage | head -n1)" 2>/dev/null || true
 
       - name: Upload AppImage artifact
