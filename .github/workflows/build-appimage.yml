@@ -230,7 +230,7 @@ jobs:
           copy_deps "$APPDIR/usr/bin/obs"
           while IFS= read -r -d '' plugin; do
             copy_deps "$plugin"
-          done < <(find "$APPDIR/usr/lib" -name '*.so*' -print0)
+          done < <(find "$APPDIR/usr/lib" -type f -name '*.so*' -print0)
 
           # Make sure obs and its plugins resolve bundled libs from AppDir.
           # The install layout nests libs under lib/<arch>-linux-gnu, so cover
@@ -243,7 +243,7 @@ jobs:
           patchelf --set-rpath "$RPATH_ARGS" "$APPDIR/usr/bin/obs"
           while IFS= read -r -d '' plugin; do
             patchelf --set-rpath '$ORIGIN:$ORIGIN/..:$ORIGIN/../..' "$plugin" || true
-          done < <(find "$APPDIR/usr/lib" -name '*.so*' -print0)
+          done < <(find "$APPDIR/usr/lib" -type f -name '*.so*' -print0)
 
           # Desktop file and icons
           DESKTOP_FILE="$APPDIR/usr/share/applications/com.obsproject.Studio.desktop"
@@ -287,17 +287,35 @@ jobs:
 
       - name: Validate AppImage squashfs integrity
         run: |
-          # Use the modern 7-Zip ("7zip", command "7zz"); the legacy p7zip
-          # ("p7zip-full", "7z") cannot open an AppImage: it fails to skip the
-          # ELF prepended to the embedded squashfs.
+          set -euo pipefail
+          # Modern 7-Zip is needed: legacy p7zip cannot skip the ELF runtime
+          # prepended to the embedded squashfs. Ubuntu 24.04's "7zip" package
+          # installs the binary as "7z" (not "7zz"), so detect whichever exists.
           sudo apt-get install -y --no-install-recommends 7zip
+          SEVENZ=$(command -v 7zz || command -v 7z || true)
+          if [ -z "$SEVENZ" ]; then
+            echo "FAIL: no 7-Zip binary found after installing 7zip"
+            dpkg -L 7zip | grep -E '/bin/' || true
+            exit 1
+          fi
+          echo "Using $SEVENZ"
+          echo "SEVENZ=$SEVENZ" >> "$GITHUB_ENV"
+
           APPIMAGE=$(ls OBS-Studio-*-x86_64.AppImage | head -n1)
           echo "Built: $APPIMAGE ($(stat -c %s "$APPIMAGE") bytes)"
           echo "sha256: $(sha256sum "$APPIMAGE" | cut -d' ' -f1)"
-          # 7zz locates the embedded squashfs itself; any undecodable block is
-          # an error. Never upload an artifact whose data blocks are corrupt.
-          ERRORS=$(7zz t -bb0 "$APPIMAGE" 2>&1 | tee /dev/stderr | grep -c '^ERROR' || true)
+
+          # Any undecodable block is an error. A non-zero exit from the tool
+          # itself also fails the step (no more "|| true" masking a missing
+          # binary as a passing check).
+          OUT=$("$SEVENZ" t -bb0 "$APPIMAGE" 2>&1) || {
+            printf '%s\n' "$OUT" | tail -n 50
+            echo "FAIL: 7-Zip reported errors testing the AppImage"
+            exit 1
+          }
+          ERRORS=$(printf '%s\n' "$OUT" | grep -c '^ERROR' || true)
           if [ "$ERRORS" -ne 0 ]; then
+            printf '%s\n' "$OUT" | grep '^ERROR' | head -n 20
             echo "FAIL: $ERRORS corrupt block(s) found in AppImage"
             exit 1
           fi
@@ -305,11 +323,11 @@ jobs:
 
       - name: Smoke-test AppImage
         run: |
-          # 7zip is already installed by the integrity-gate step and reliably
-          # reads the embedded squashfs (legacy unsquashfs cannot skip the ELF
-          # header, and the AppImage runtime needs FUSE to self-extract).
+          set -euo pipefail
+          # 7-Zip was installed (and its binary path exported as SEVENZ) by the
+          # integrity-gate step. It reads the embedded squashfs without FUSE.
           APPIMAGE=$(ls OBS-Studio-*-x86_64.AppImage | head -n1)
-          7zz l "$APPIMAGE" > /tmp/appimage-list.txt
+          "$SEVENZ" l "$APPIMAGE" > /tmp/appimage-list.txt
           FAIL=0
           for f in \
             AppRun \
