@@ -1,0 +1,117 @@
+name: Build OBS Studio (Windows x64)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+env:
+  BUILD_DIR: build_x64
+  CONFIG: Release
+
+jobs:
+  build-windows:
+    name: Build OBS Studio (Windows x64)
+    # CMakePresets.json uses the "Visual Studio 18 2026" generator, which needs
+    # the VS 2026 runner image (windows-latest/windows-2025 also carry it now).
+    runs-on: windows-2025-vs2026
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Ensure version tags exist
+        shell: bash
+        run: |
+          if ! git describe --tags >/dev/null 2>&1; then
+            git tag "$(date -u +'%Y.%-m.%d')"
+            echo "Created fallback version tag: $(date -u +'%Y.%-m.%d')"
+          fi
+          VERSION=$(git describe --tags --always --dirty)
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+          echo "Version: ${VERSION}"
+
+      # Qt6, prebuilt OBS dependencies (FFmpeg, x264, curl, ...) and CEF are
+      # downloaded and hash-verified by the CMake buildspec at configure time
+      # (pinned in CMakePresets.json), so nothing else needs installing here.
+      - name: Cache prebuilt dependencies
+        uses: actions/cache@v4
+        with:
+          path: .deps
+          key: obs-deps-windows-x64-${{ hashFiles('CMakePresets.json') }}
+
+      - name: Configure
+        shell: pwsh
+        run: |
+          # Warnings-as-errors is off for custom builds (upstream CI turns it on
+          # with the windows-ci-x64 preset); deprecations stay warnings like the
+          # Linux job.
+          cmake --preset windows-x64 `
+            -DCMAKE_COMPILE_WARNING_AS_ERROR=OFF `
+            -DOBS_COMPILE_DEPRECATION_AS_WARNING=ON `
+            -DENABLE_BROWSER=ON `
+            -DENABLE_WEBRTC=ON `
+            -DENABLE_PORTABLE_CONFIG=ON
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Build
+        shell: pwsh
+        run: |
+          cmake --build --preset windows-x64 --config $env:CONFIG --parallel -- /consoleLoggerParameters:Summary /noLogo
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Install
+        shell: pwsh
+        run: |
+          cmake --install $env:BUILD_DIR --prefix "$env:BUILD_DIR/install" --config $env:CONFIG
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Package
+        shell: pwsh
+        run: |
+          Push-Location $env:BUILD_DIR
+          cpack -C $env:CONFIG
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $zip = Get-ChildItem -Filter 'obs-studio-*-windows-x64.zip' -File | Select-Object -First 1
+          if (-not $zip) { throw 'cpack did not produce a Windows zip' }
+          $out = "OBS-Studio-$env:VERSION-windows-x64.zip"
+          Move-Item $zip.FullName "../$out"
+          Pop-Location
+          "PACKAGE=$out" >> $env:GITHUB_ENV
+          Write-Host "Packaged: $out ($([math]::Round((Get-Item $out).Length / 1MB, 1)) MB)"
+
+      - name: Smoke-test package
+        shell: pwsh
+        run: |
+          $listing = & 7z l -slt $env:PACKAGE | Out-String
+          if ($LASTEXITCODE -ne 0) { throw '7z could not read the package' }
+          $fail = $false
+          foreach ($f in @(
+            'bin/64bit/obs64.exe',
+            'bin/64bit/obs.dll',
+            'obs-plugins/64bit/obs-browser.dll',
+            'obs-plugins/64bit/obs-ffmpeg.dll',
+            'obs-plugins/64bit/obs-x264.dll',
+            'obs-plugins/64bit/rtmp-services.dll',
+            'obs-plugins/64bit/win-capture.dll',
+            'obs-plugins/64bit/win-dshow.dll',
+            'data/obs-studio/locale/en-US.ini'
+          )) {
+            # 7z -slt prints "Path = <name>" using backslashes
+            $pattern = 'Path = ' + [regex]::Escape($f.Replace('/', '\'))
+            if ($listing -match $pattern) { Write-Host "OK: $f" }
+            else { Write-Host "FAIL: $f missing"; $fail = $true }
+          }
+          if ($fail) { exit 1 }
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: obs-studio-${{ env.VERSION }}-windows-x64
+          path: OBS-Studio-*-windows-x64.zip
+          if-no-files-found: error
