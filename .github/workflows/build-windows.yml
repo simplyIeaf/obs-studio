@@ -45,6 +45,18 @@ jobs:
           path: .deps
           key: obs-deps-windows-x64-${{ hashFiles('CMakePresets.json') }}
 
+      - name: Fetch legacy nv-codec-headers (NVENC SDK 10)
+        shell: pwsh
+        run: |
+          # Same headers as the Linux job. The obs-deps headers are newer and
+          # make obs-nvenc-test report "outdated_driver" on legacy (Kepler)
+          # drivers; SDK 10 headers compile in the plugin's older-API paths.
+          git clone --depth 1 --branch n10.0.26.0 https://github.com/FFmpeg/nv-codec-headers.git "$env:RUNNER_TEMP/nv-codec-headers"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $inc = "$env:RUNNER_TEMP/nv-codec-headers/include"
+          if (-not (Test-Path "$inc/ffnvcodec/nvEncodeAPI.h")) { throw "nvEncodeAPI.h not found in $inc" }
+          "NVCODEC_INCLUDE_DIR=$($inc -replace '\\','/')" >> $env:GITHUB_ENV
+
       - name: Configure
         shell: pwsh
         run: |
@@ -56,7 +68,9 @@ jobs:
             -DOBS_COMPILE_DEPRECATION_AS_WARNING=ON `
             -DENABLE_BROWSER=ON `
             -DENABLE_WEBRTC=ON `
-            -DENABLE_PORTABLE_CONFIG=ON
+            -DENABLE_PORTABLE_CONFIG=ON `
+            -DENABLE_FFMPEG_NVENC=OFF `
+            -DFFnvcodec_INCLUDE_DIR="$env:NVCODEC_INCLUDE_DIR"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build
@@ -96,6 +110,8 @@ jobs:
             'bin/64bit/obs.dll',
             'obs-plugins/64bit/obs-browser.dll',
             'obs-plugins/64bit/obs-ffmpeg.dll',
+            'obs-plugins/64bit/obs-nvenc.dll',
+            'bin/64bit/obs-nvenc-test.exe',
             'obs-plugins/64bit/obs-x264.dll',
             'obs-plugins/64bit/rtmp-services.dll',
             'obs-plugins/64bit/win-capture.dll',
