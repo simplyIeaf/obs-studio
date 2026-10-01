@@ -1,3 +1,4 @@
+#include <string>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
@@ -139,6 +140,8 @@ struct NVML {
 	NVML_GET_ENCODER_CAPACITY getEncoderCapacity;
 	NVML_GET_ENCODER_UTILISATION getEncoderUtilisation;
 
+	bool available = false;
+
 	NVML() = default;
 
 	~NVML()
@@ -150,8 +153,9 @@ struct NVML {
 
 	bool Init()
 	{
+		/* NVML only provides informational data (names, PCIe info, session
+		 * counts). A missing/old NVML must not disable NVENC. */
 		if (!load_nvml_lib()) {
-			printf("reason=nvml_lib\n");
 			return false;
 		}
 
@@ -177,11 +181,11 @@ struct NVML {
 
 		nvmlReturn_t res = init();
 		if (res != 0) {
-			printf("reason=nvml_init_%d\n", res);
 			return false;
 		}
 
 		initialised = true;
+		available = true;
 		return true;
 	}
 
@@ -193,6 +197,14 @@ private:
 	{
 #ifdef _WIN32
 		nvml_lib = LoadLibraryA("nvml.dll");
+		if (!nvml_lib) {
+			char path[MAX_PATH];
+			DWORD len = GetEnvironmentVariableA("ProgramFiles", path, sizeof(path));
+			if (len && len < sizeof(path)) {
+				std::string full = std::string(path) + "\\NVIDIA Corporation\\NVSMI\\nvml.dll";
+				nvml_lib = LoadLibraryA(full.c_str());
+			}
+		}
 #else
 		nvml_lib = dlopen("libnvidia-ml.so.1", RTLD_LAZY);
 #endif
@@ -329,7 +341,7 @@ static bool get_adapter_caps(int adapter_idx, codec_caps_map &caps, device_info 
 	device_info.cuda_uuid = cudaCtx.GetUUID();
 
 	nvmlDevice_t dev;
-	if (nvml.getDeviceHandleByPCIBusId(device_info.pci_id.data(), &dev) == NVML_SUCCESS) {
+	if (nvml.available && nvml.getDeviceHandleByPCIBusId(device_info.pci_id.data(), &dev) == NVML_SUCCESS) {
 		char uuid[NVML_DEVICE_UUID_V2_BUFFER_SIZE];
 		nvml.getDeviceUUID(dev, uuid, sizeof(uuid));
 		device_info.nvml_uuid = uuid;
@@ -424,9 +436,7 @@ bool nvenc_checks(codec_caps_map &caps, vector<device_info> &device_infos)
 	}
 
 	NVML nvml;
-	if (!nvml.Init()) {
-		return false;
-	}
+	nvml.Init(); /* optional: failure is non-fatal */
 
 	/* --------------------------------------------------------- */
 	/* obtain adapter compatibility information                  */
@@ -441,7 +451,7 @@ bool nvenc_checks(codec_caps_map &caps, vector<device_info> &device_infos)
 	bool session_limit = false;
 
 	/* NVIDIA driver version */
-	if (nvml.getDriverVersion(driver_ver, sizeof(driver_ver)) == NVML_SUCCESS) {
+	if (nvml.available && nvml.getDriverVersion(driver_ver, sizeof(driver_ver)) == NVML_SUCCESS) {
 		printf("driver_ver=%s\n", driver_ver);
 	} else {
 		// Treat this as a non-fatal failure
