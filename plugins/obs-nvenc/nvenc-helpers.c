@@ -205,17 +205,18 @@ static inline bool init_nvenc_internal(obs_encoder_t *encoder)
 
 	uint32_t ver = get_nvenc_ver();
 	if (ver == 0) {
-		obs_encoder_set_last_error(encoder, "Missing NvEncodeAPIGetMaxSupportedVersion, check "
-						    "your video card drivers are up to date.");
-		return false;
-	}
-
-	if (ver < NVCODEC_CONFIGURED_VERSION) {
-		obs_encoder_set_last_error(encoder, obs_module_text("OutdatedDriver"));
-
-		error("Current driver version does not support this NVENC "
-		      "version, please upgrade your driver");
-		return false;
+		/*
+		 * The max-version helper is not available on some legacy NVENC
+		 * drivers.  Do not make that optional query a hard failure.
+		 */
+		blog(LOG_WARNING, "[obs-nvenc] Could not query maximum NVENC API version; continuing to NvEncodeAPICreateInstance()");
+	} else if (ver < NVCODEC_CONFIGURED_VERSION) {
+		/*
+		 * Do not reject the driver based only on its reported API maximum.
+		 * NvEncodeAPICreateInstance() is the real compatibility boundary.
+		 */
+		blog(LOG_WARNING, "[obs-nvenc] Driver reports NVENC API 0x%08x; continuing with configured API 0x%08x",
+		     ver, NVCODEC_CONFIGURED_VERSION);
 	}
 
 	nv_create_instance = (NV_CREATE_INSTANCE_FUNC)load_nv_func("NvEncodeAPICreateInstance");
