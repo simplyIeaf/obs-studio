@@ -13,12 +13,11 @@ MODULE_EXPORT const char *obs_module_description(void)
 bool obs_module_load(void)
 {
 	/*
-	 * Legacy/Kepler compatibility: do not use the preflight capability
-	 * check as a module-load gate. Let real NVENC initialization decide.
+	 * Legacy NVENC compatibility:
+	 * Do not run the OBS NVENC preflight as a module-load gate.
+	 * Encoder registration is unconditional; the real NVENC API is
+	 * exercised when the encoder is created.
 	 */
-	if (!nvenc_supported())
-		blog(LOG_WARNING, "[obs-nvenc] Preflight reports NVENC unsupported; forcing encoder registration for legacy compatibility");
-
 	obs_nvenc_load();
 	obs_cuda_load();
 
