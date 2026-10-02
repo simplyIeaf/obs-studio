@@ -12,10 +12,12 @@ MODULE_EXPORT const char *obs_module_description(void)
 
 bool obs_module_load(void)
 {
-	if (!nvenc_supported()) {
-		blog(LOG_INFO, "NVENC not supported");
-		return false;
-	}
+	/*
+	 * Legacy/Kepler compatibility: do not use the preflight capability
+	 * check as a module-load gate. Let real NVENC initialization decide.
+	 */
+	if (!nvenc_supported())
+		blog(LOG_WARNING, "[obs-nvenc] Preflight reports NVENC unsupported; forcing encoder registration for legacy compatibility");
 
 	obs_nvenc_load();
 	obs_cuda_load();
