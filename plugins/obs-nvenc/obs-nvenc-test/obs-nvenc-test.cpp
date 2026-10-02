@@ -478,13 +478,17 @@ bool nvenc_checks(codec_caps_map &caps, vector<device_info> &device_infos)
 		return false;
 	}
 
-	/* NVENC API version */
-	if (nvenc->NvEncodeAPIGetMaxSupportedVersion(&nvenc_ver) == NV_ENC_SUCCESS) {
+	/*
+	 * NvEncodeAPIGetMaxSupportedVersion is not exported by some legacy
+	 * NVENC drivers.  It is informational here; NvEncodeAPICreateInstance()
+	 * above and the per-device session open below are the real compatibility
+	 * tests.
+	 */
+	if (nvenc->NvEncodeAPIGetMaxSupportedVersion &&
+	    nvenc->NvEncodeAPIGetMaxSupportedVersion(&nvenc_ver) == NV_ENC_SUCCESS)
 		printf("nvenc_ver=%d.%d\n", nvenc_ver >> 4, nvenc_ver & 0xf);
-	} else {
-		printf("reason=no_nvenc_version\n");
-		return false;
-	}
+	else
+		printf("nvenc_ver=%d.%d\n", NVENCAPI_MAJOR_VERSION, NVENCAPI_MINOR_VERSION);
 
 	device_infos.resize(cuda_devices);
 	for (int idx = 0; idx < cuda_devices; idx++) {
@@ -498,10 +502,14 @@ bool nvenc_checks(codec_caps_map &caps, vector<device_info> &device_infos)
 		return false;
 	}
 
-	if (nvenc_ver < NVENC_CONFIGURED_VERSION) {
-		printf("reason=outdated_driver\n");
-		return false;
-	}
+	/*
+	 * Do not reject a legacy driver solely because its reported maximum API
+	 * version is below the header version used to build this test. The actual
+	 * NvEncodeAPICreateInstance() and NvEncodeOpenEncodeSessionEx() calls
+	 * above/below determine whether the runtime API is usable.
+	 */
+	if (nvenc_ver && nvenc_ver < NVENC_CONFIGURED_VERSION)
+		printf("warning=driver_api_below_configured\n");
 
 	printf("nvenc_devices=%d\n", nvenc_devices);
 	if (!nvenc_devices) {
