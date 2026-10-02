@@ -135,8 +135,14 @@ static uint32_t get_nvenc_ver(void)
 
 		nv_max_ver = (NV_MAX_VER_FUNC)load_nv_func("NvEncodeAPIGetMaxSupportedVersion");
 		if (!nv_max_ver) {
-			failed = true;
-			return 0;
+			/*
+			 * Legacy NVENC drivers (including SDK 10-era drivers) may not
+			 * export NvEncodeAPIGetMaxSupportedVersion at all.  In that case
+			 * use the API version we compiled against and let
+			 * NvEncodeAPICreateInstance() perform the real compatibility check.
+			 */
+			ver = NVCODEC_CONFIGURED_VERSION;
+			return ver;
 		}
 	}
 
@@ -205,18 +211,11 @@ static inline bool init_nvenc_internal(obs_encoder_t *encoder)
 	}
 
 	if (ver < NVCODEC_CONFIGURED_VERSION) {
-		/*
-		 * Legacy NVENC compatibility:
-		 * Do not reject the device solely because the driver reports an
-		 * older maximum API version than the headers used to compile this
-		 * plugin.  Continue to NvEncodeAPICreateInstance(); if the driver
-		 * cannot create the requested API instance, that real API failure
-		 * remains fatal.
-		 */
-		blog(LOG_WARNING,
-		     "[obs-nvenc] Driver NVENC API version %u is below configured "
-		     "version %u; continuing for legacy compatibility",
-		     ver, NVCODEC_CONFIGURED_VERSION);
+		obs_encoder_set_last_error(encoder, obs_module_text("OutdatedDriver"));
+
+		error("Current driver version does not support this NVENC "
+		      "version, please upgrade your driver");
+		return false;
 	}
 
 	nv_create_instance = (NV_CREATE_INSTANCE_FUNC)load_nv_func("NvEncodeAPICreateInstance");
@@ -375,18 +374,13 @@ fail:
 static const char *nvenc_check_name = "nvenc_check";
 bool nvenc_supported(void)
 {
-	/*
-	 * Legacy/Kepler compatibility:
-	 *
-	 * OBS's nvenc-test performs an NVML/preflight capability check before
-	 * loading the encoder.  That check can reject legacy GPUs/drivers before
-	 * the NVENC API is ever exercised.  Do not use it as a gate.
-	 *
-	 * The actual encoder path still calls NvEncodeAPICreateInstance(),
-	 * opens an NVENC session, and initializes the encoder.  A real API
-	 * failure is therefore still reported by the encoder.
-	 */
-	return true;
+	bool success;
+
+	profile_start(nvenc_check_name);
+	success = load_nvenc_lib() && nvenc_check();
+	profile_end(nvenc_check_name);
+
+	return success;
 }
 
 void obs_nvenc_load(void)
