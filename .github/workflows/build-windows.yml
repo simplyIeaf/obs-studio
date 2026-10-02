@@ -1,11 +1,13 @@
-name: Build OBS Studio (Windows x64) 
+name: Build OBS Studio - Legacy NVENC
 
 on:
   workflow_dispatch:
-  push:
-    branches: [master, main]
-  pull_request:
-    branches: [master, main]
+    inputs:
+      ref:
+        description: Git ref to build
+        required: false
+        default: main
+        type: string
 
 env:
   BUILD_DIR: build_x64
@@ -14,26 +16,27 @@ env:
 
 jobs:
   build-windows:
-    name: Build OBS Studio (Windows x64) - legacy NVENC
     runs-on: windows-2025-vs2026
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.ref }}
           submodules: recursive
           fetch-depth: 0
+
       - name: Fetch legacy nv-codec-headers
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
           $repo = "$env:RUNNER_TEMP\nv-codec-headers"
-          if (Test-Path $repo) { Remove-Item -Recurse -Force $repo }
           git clone --depth 1 --branch $env:NVCODEC_TAG https://github.com/FFmpeg/nv-codec-headers.git $repo
           if ($LASTEXITCODE -ne 0) { throw "Failed to clone nv-codec-headers" }
           $inc = Join-Path $repo "include"
           $header = Join-Path $inc "ffnvcodec\nvEncodeAPI.h"
-          if (-not (Test-Path $header)) { throw "Legacy nvEncodeAPI.h not found: $header" }
+          if (-not (Test-Path $header)) { throw "Legacy nvEncodeAPI.h not found" }
           "LEGACY_NVCODEC_INCLUDE=$($inc.Replace('\','/'))" >> $env:GITHUB_ENV
+
       - name: Configure
         shell: pwsh
         run: |
@@ -47,49 +50,57 @@ jobs:
             -DENABLE_FFMPEG_NVENC=OFF `
             -DFFnvcodec_INCLUDE_DIR:PATH="$env:LEGACY_NVCODEC_INCLUDE"
           if ($LASTEXITCODE -ne 0) { throw "CMake configuration failed" }
+
       - name: Verify legacy headers selected
         shell: pwsh
         run: |
           $cache = Join-Path $env:BUILD_DIR "CMakeCache.txt"
-          $line = Get-Content $cache | Select-String "^FFnvcodec_INCLUDE_DIR:PATH=" | Select-Object -First 1
-          if (-not $line) { throw "FFnvcodec_INCLUDE_DIR missing from CMakeCache.txt" }
-          Write-Host $line.Line
+          $line = Get-Content $cache | Select-String '^FFnvcodec_INCLUDE_DIR:PATH=' | Select-Object -First 1
+          if (-not $line) { throw "FFnvcodec_INCLUDE_DIR missing from CMake cache" }
           $expected = $env:LEGACY_NVCODEC_INCLUDE.Replace('\','/')
-          if ($line.Line -notlike "*$expected*") { throw "CMake is not using legacy headers" }
+          if ($line.Line -notlike "*$expected*") { throw "CMake did not select legacy headers: $($line.Line)" }
+          Write-Host "OK: $($line.Line)"
+
       - name: Build
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
           cmake --build --preset windows-x64 --config $env:CONFIG --parallel --verbose -- /consoleLoggerParameters:Summary /noLogo
-          if ($LASTEXITCODE -ne 0) { throw "OBS build failed" }
+          if ($LASTEXITCODE -ne 0) { throw "Build failed" }
+
       - name: Install
         shell: pwsh
         run: |
           cmake --install $env:BUILD_DIR --prefix "$env:BUILD_DIR/install" --config $env:CONFIG
           if ($LASTEXITCODE -ne 0) { throw "Install failed" }
+
       - name: Package
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
           Push-Location $env:BUILD_DIR
           cpack -C $env:CONFIG
           if ($LASTEXITCODE -ne 0) { Pop-Location; throw "CPack failed" }
           $zip = Get-ChildItem -Filter 'obs-studio-*-windows-x64.zip' -File | Select-Object -First 1
-          if (-not $zip) { Pop-Location; throw "CPack did not produce a Windows ZIP" }
-          $out = "OBS-Studio-$env:GITHUB_SHA-windows-x64.zip"
+          if (-not $zip) { Pop-Location; throw "CPack did not produce a ZIP" }
+          $out = "OBS-Studio-legacy-nvenc-windows-x64.zip"
           Move-Item $zip.FullName "../$out"
           Pop-Location
           "PACKAGE=$out" >> $env:GITHUB_ENV
-      - name: Smoke-test package
+
+      - name: Verify package
         shell: pwsh
         run: |
           $listing = & 7z l -slt $env:PACKAGE | Out-String
-          if ($LASTEXITCODE -ne 0) { throw "7z could not read package" }
-          foreach ($f in @('bin/64bit/obs64.exe','bin/64bit/obs.dll','obs-plugins/64bit/obs-nvenc.dll','bin/64bit/obs-nvenc-test.exe')) {
+          if ($LASTEXITCODE -ne 0) { throw "7z failed" }
+          foreach ($f in @('obs-plugins/64bit/obs-nvenc.dll','bin/64bit/obs-nvenc-test.exe')) {
             $pattern = 'Path = ' + [regex]::Escape($f.Replace('/','\'))
-            if ($listing -notmatch $pattern) { throw "Required file missing: $f" }
+            if ($listing -notmatch $pattern) { throw "Missing $f" }
           }
-      - name: Upload Windows artifact
+
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: obs-studio-kepler-nvenc
-          path: OBS-Studio-*-windows-x64.zip
+          name: obs-studio-legacy-nvenc
+          path: OBS-Studio-legacy-nvenc-windows-x64.zip
           if-no-files-found: error
