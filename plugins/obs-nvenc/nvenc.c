@@ -131,7 +131,14 @@ static bool nvenc_update(void *data, obs_data_t *settings)
 static bool init_session(struct nvenc_data *enc)
 {
 	NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS params = {NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS_VER};
-	params.apiVersion = NVENCAPI_VERSION;
+	/*
+	 * Legacy-driver compatibility: if the driver exposes a maximum API
+	 * version, use that version for the session request rather than blindly
+	 * advertising the version used to compile OBS.  The structure ABI remains
+	 * the one supplied by the selected nv-codec-headers.
+	 */
+	uint32_t driver_api = get_nvenc_ver();
+	params.apiVersion = driver_api ? driver_api : NVCODEC_CONFIGURED_VERSION;
 #ifdef _WIN32
 	if (enc->non_texture) {
 		params.device = enc->cu_ctx;
