@@ -80,6 +80,7 @@ extern NV_CREATE_INSTANCE_FUNC nv_create_instance;
 
 const char *nv_error_name(NVENCSTATUS err);
 
+uint32_t get_nvenc_ver(void);
 bool init_nvenc(obs_encoder_t *encoder);
 bool nv_fail2(obs_encoder_t *encoder, void *session, const char *format, ...);
 bool nv_failed2(obs_encoder_t *encoder, void *session, NVENCSTATUS err, const char *func, const char *call);
