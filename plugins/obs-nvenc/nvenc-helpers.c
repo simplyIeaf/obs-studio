@@ -120,7 +120,7 @@ static void *load_nv_func(const char *func)
 
 typedef NVENCSTATUS(NVENCAPI *NV_MAX_VER_FUNC)(uint32_t *);
 
-static uint32_t get_nvenc_ver(void)
+uint32_t get_nvenc_ver(void)
 {
 	static NV_MAX_VER_FUNC nv_max_ver = NULL;
 	static bool failed = false;
